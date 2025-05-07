@@ -1,0 +1,82 @@
+# 광고 캠페인 분석 대시보드 설정 파일
+
+# 데이터 경로
+data_path: 'data/campaign_data.csv'
+
+# 대시보드 설정
+dashboard:
+  title: '광고 캠페인 효과 분석 대시보드'
+  description: '이 대시보드는 광고 캠페인의 효과를 측정하고 분석하는 도구입니다. 다양한 광고 지표를 시각화하고 회귀 분석을 통해 ROAS에 영향을 미치는 주요 요인을 파악할 수 있습니다.'
+
+# 회귀 분석 설정
+regression:
+  target: 'roas'  # 종속 변수
+  default_features:  # 기본 독립 변수
+    - 'spend'
+    - 'impressions'
+    - 'clicks'
+    - 'ctr'
+    - 'conversions'
+    - 'cvr'
+
+# 시각화 설정
+visualization:
+  color_scheme: 'viridis'
+  default_height: 500
+  
+# 필터 설정
+filters:
+  date_range: true
+  platform: true
+  campaign: true
+  target_age: true
+  target_gender: true
+  creative_type: true
+
+# 메트릭 설정
+metrics:
+  primary:
+    - 'spend'
+    - 'revenue'
+    - 'roas'
+    - 'cpa'
+  time_series:
+    - 'spend'
+    - 'impressions'
+    - 'clicks'
+    - 'conversions'
+    - 'revenue'
+    - 'ctr'
+    - 'cvr'
+    - 'roas'
+
+# 보고서 설정
+reporting:
+  schedule: 'weekly'
+  format: 'pdf'
+
+# 사용자 정의 KPI
+custom_kpi:
+  definitions: {}
+  targets: {}
+
+# 이메일 설정 (보고서 전송용)
+email:
+  smtp_server: 'smtp.gmail.com'
+  smtp_port: 587
+  username: 'your-email@gmail.com'
+  password: 'your-app-password'
+  sender_email: 'your-email@gmail.com'
+
+# 알림 설정
+alerts:
+  thresholds:
+    roas_min_threshold: 1.0
+    ctr_min_threshold: 0.01
+    cvr_min_threshold: 0.01
+    spend_change_threshold: 0.2
+    revenue_change_threshold: 0.2
+  channels:
+    - 'email'
+  email_recipients:
+    - 'recipient-email@example.com'
