@@ -80,7 +80,7 @@ data_source = st.sidebar.radio(
 
 # 데이터 로드 함수 수정
 @st.cache_data
-def load_data(file_path=None, uploaded_file=None, apply_preprocessing=True):
+def load_data(file_path=None, uploaded_file=None):
     # 업로드된 파일이 있는 경우
     if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
@@ -95,26 +95,33 @@ def load_data(file_path=None, uploaded_file=None, apply_preprocessing=True):
     if 'date' in df.columns:
         df['date'] = pd.to_datetime(df['date'])
     
-    # 원본 데이터 보존
+    # 원본 데이터 저장
     original_df = df.copy()
     
-    # 데이터 전처리 적용 (옵션)
-    if apply_preprocessing:
-        preprocessor = DataPreprocessor()
-        df, preprocessing_info = preprocessor.preprocess_data(
-            df,
-            remove_outliers=True,
-            outlier_method='iqr',
-            normalize=True,
-            normalization_method='robust',
-            create_features=True
-        )
-        
-        # 전처리 정보 저장
-        st.session_state.preprocessing_info = preprocessing_info
+    # 데이터 전처리 적용
+    preprocessor = DataPreprocessor()
+    df, preprocessing_info = preprocessor.preprocess_data(
+        df,
+        remove_outliers=True,
+        outlier_method='zscore',
+        normalize=True,
+        normalization_method='robust',
+        create_features=True
+    )
     
-    # 원본 데이터 저장
+    # 전처리 정보와 원본 데이터 저장
+    st.session_state.preprocessing_info = preprocessing_info
     st.session_state.original_df = original_df
+    
+    # 전처리된 데이터에 원본 데이터의 컬럼 추가 (시각화용)
+    # 회귀 분석용 컬럼은 전처리된 값 유지
+    analysis_columns = ['spend', 'impressions', 'clicks', 'ctr', 'conversions', 'cvr']
+    display_columns = ['revenue', 'roas', 'campaign_name', 'platform', 'creative_type', 
+                      'target_age', 'target_gender', 'date']
+    
+    for col in display_columns:
+        if col in original_df.columns and col in df.columns:
+            df[f"original_{col}"] = original_df[col]
     
     return df
 
@@ -316,59 +323,7 @@ try:
     if not filtered_df.empty:
         campaign_perf = budget_optimizer.analyze_and_visualize(filtered_df)
     else:
-        st.warning("데이터가 없습니다. 필터 조건을 변경해보세요.")
-    
-    # 전처리 정보 표시 섹션
-    if hasattr(st.session_state, 'preprocessing_info'):
-        st.header("데이터 전처리 정보")
-        
-        preprocessing_info = st.session_state.preprocessing_info
-        
-        # 적용된 전처리 단계
-        st.subheader("적용된 전처리 단계")
-        for step in preprocessing_info['steps_applied']:
-            st.write(f"- {step}")
-        
-        # 이상치 정보
-        if 'outliers' in preprocessing_info:
-            st.subheader("이상치 처리 정보")
-            outliers_info = preprocessing_info['outliers']
-            
-            st.write(f"이상치 탐지 방법: {outliers_info['method']}")
-            st.write(f"처리된 이상치 수: {outliers_info['total_outliers_handled']}")
-            
-            # 컬럼별 이상치 수
-            col1, col2 = st.columns(2)
-            with col1:
-                st.write("컬럼별 이상치 수:")
-                for col, count in outliers_info['outliers_by_column'].items():
-                    st.write(f"- {col}: {count}")
-            
-            with col2:
-                # 이상치 비율 시각화
-                if outliers_info['outliers_by_column']:
-                    import plotly.express as px
-                    outlier_df = pd.DataFrame({
-                        'column': list(outliers_info['outliers_by_column'].keys()),
-                        'count': list(outliers_info['outliers_by_column'].values())
-                    })
-                    
-                    fig = px.bar(
-                        outlier_df, 
-                        x='column', 
-                        y='count',
-                        title='컬럼별 이상치 수',
-                        labels={'column': '컬럼', 'count': '이상치 수'}
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-        
-        # 파생변수 정보
-        if 'features' in preprocessing_info and preprocessing_info['features']['created_features']:
-            st.subheader("생성된 파생변수")
-            for feature in preprocessing_info['features']['created_features']:
-                st.write(f"- {feature}")
-    
-    
+        st.warning("데이터가 없습니다. 필터 조건을 변경해보세요.")    
     
     # 사용자 정의 KPI 관리
     st.sidebar.header("사용자 정의 KPI")
@@ -1237,6 +1192,55 @@ try:
         except Exception as e:
             st.error(f"최적화 제안 생성 중 오류가 발생했습니다: {e}")
     
+    # 전처리 정보 표시 섹션 (하단으로 이동하고 expander로 변경)
+    with st.expander("데이터 전처리 정보", expanded=False):
+        if hasattr(st.session_state, 'preprocessing_info'):
+            preprocessing_info = st.session_state.preprocessing_info
+            
+            # 적용된 전처리 단계
+            st.subheader("적용된 전처리 단계")
+            for step in preprocessing_info['steps_applied']:
+                st.write(f"- {step}")
+            
+            # 이상치 정보
+            if 'outliers' in preprocessing_info:
+                st.subheader("이상치 처리 정보")
+                outliers_info = preprocessing_info['outliers']
+                
+                st.write(f"이상치 탐지 방법: {outliers_info['method']}")
+                st.write(f"처리된 이상치 수: {outliers_info['total_outliers_handled']}")
+                
+                # 컬럼별 이상치 수
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("컬럼별 이상치 수:")
+                    for col, count in outliers_info['outliers_by_column'].items():
+                        st.write(f"- {col}: {count}")
+                
+                with col2:
+                    # 이상치 비율 시각화
+                    if outliers_info['outliers_by_column']:
+                        import plotly.express as px
+                        outlier_df = pd.DataFrame({
+                            'column': list(outliers_info['outliers_by_column'].keys()),
+                            'count': list(outliers_info['outliers_by_column'].values())
+                        })
+                        
+                        fig = px.bar(
+                            outlier_df, 
+                            x='column', 
+                            y='count',
+                            title='컬럼별 이상치 수',
+                            labels={'column': '컬럼', 'count': '이상치 수'}
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+            
+            # 파생변수 정보
+            if 'features' in preprocessing_info and preprocessing_info['features']['created_features']:
+                st.subheader("생성된 파생변수")
+                for feature in preprocessing_info['features']['created_features']:
+                    st.write(f"- {feature}")
+                    
     # 피드백 섹션
     st.markdown("---")
     st.header("피드백")
@@ -1292,7 +1296,7 @@ try:
     # 푸터
     st.markdown("---")
     st.markdown(f"데이터 마지막 업데이트: {max_date}")
-    st.markdown("© 2025 광고 캠페인 분석 대시보드")
+    st.markdown("© 2025 광고 캠페인 분석 대시보드(Yoonsll)")
 
 except FileNotFoundError:
     st.error("설정 파일 또는 데이터 파일을 찾을 수 없습니다. config.yaml 파일이 존재하는지 확인해주세요.")

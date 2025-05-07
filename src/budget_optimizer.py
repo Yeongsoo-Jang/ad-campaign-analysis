@@ -43,7 +43,18 @@ class BudgetOptimizer:
             st.warning("데이터가 없습니다. 필터 조건을 변경해보세요.")
             return
         
-        # 캠페인별 성과 집계
+        # 원본 데이터 가져오기 (있는 경우)
+        if hasattr(st.session_state, 'original_df'):
+            original_df = st.session_state.original_df
+            use_original = True
+        else:
+            original_df = df
+            use_original = False
+        
+        # 캠페인 이름을 키로 사용하여 원본 데이터와 분석 데이터 매핑
+        campaign_names = df['campaign_name'].unique()
+        
+        # 캠페인별 성과 집계 (분석용 - 전처리된 데이터)
         campaign_perf = df.groupby('campaign_name').agg({
             'spend': 'sum',
             'revenue': 'sum',
@@ -51,15 +62,37 @@ class BudgetOptimizer:
             'date': 'count'  # 데이터 포인트 수 (신뢰도 계산에 사용)
         }).reset_index()
         
-        # ROAS 및 기타 지표 계산
+        # 원본 데이터로 캠페인별 성과 집계 (표시용)
+        if use_original:
+            original_campaign_perf = original_df.groupby('campaign_name').agg({
+                'spend': 'sum',
+                'revenue': 'sum',
+                'conversions': 'sum',
+                'date': 'count'  # 데이터 포인트 수 (신뢰도 계산에 사용)
+            }).reset_index()
+            
+            # 두 데이터프레임 병합
+            campaign_perf = pd.merge(
+                campaign_perf, 
+                original_campaign_perf, 
+                on='campaign_name', 
+                suffixes=('', '_original')
+            )
+        
+        # ROAS 및 기타 지표 계산 (분석용)
         campaign_perf['roas'] = campaign_perf['revenue'] / campaign_perf['spend']
         campaign_perf['cpa'] = campaign_perf['spend'] / campaign_perf['conversions'].apply(lambda x: max(x, 1))  # 0으로 나누기 방지
         
-        # 효율성 점수 계산 (ROAS 기반)
+        # 원본 데이터 지표 계산 (표시용)
+        if use_original:
+            campaign_perf['roas_original'] = campaign_perf['revenue_original'] / campaign_perf['spend_original']
+            campaign_perf['cpa_original'] = campaign_perf['spend_original'] / campaign_perf['conversions_original'].apply(lambda x: max(x, 1))
+        
+        # 효율성 점수 계산 (ROAS 기반 - 분석용)
         mean_roas = campaign_perf['roas'].mean()
         campaign_perf['efficiency'] = campaign_perf['roas'] / mean_roas
         
-        # 예산 조정 권장 비율 계산
+        # 예산 조정 권장 비율 계산 (표시용 지표는 원본 사용)
         campaign_perf['budget_adjustment'] = (campaign_perf['efficiency'] - 1) * 100
         
         # 통계적 유의성 테스트를 위한 데이터 준비
@@ -87,7 +120,19 @@ class BudgetOptimizer:
         # 결과 정렬
         campaign_perf = campaign_perf.sort_values('efficiency', ascending=False)
         
-        # 시각화 및 분석 결과 표시
+        # 시각화 및 분석 결과 표시 시 원본 수치 사용
+        display_columns = ['roas', 'cpa']
+        if use_original:
+            for col in display_columns:
+                if f'{col}_original' in campaign_perf.columns:
+                    campaign_perf[f'{col}_display'] = campaign_perf[f'{col}_original']
+                else:
+                    campaign_perf[f'{col}_display'] = campaign_perf[col]
+        else:
+            for col in display_columns:
+                campaign_perf[f'{col}_display'] = campaign_perf[col]
+        
+        # 결과 시각화 및 표시 (원본 수치 사용)
         self._display_optimization_results(campaign_perf, mean_roas)
         
         return campaign_perf
@@ -251,6 +296,15 @@ class BudgetOptimizer:
             campaign_perf (pandas.DataFrame): 분석이 완료된 캠페인 성과 데이터
             mean_roas (float): 전체 평균 ROAS
         """
+        
+        # 원본 데이터로 시각화
+        if 'original_roas' in campaign_perf.columns:
+            campaign_perf['roas_display'] = campaign_perf['original_roas']
+            mean_roas_display = campaign_perf['original_roas'].mean()
+        else:
+            campaign_perf['roas_display'] = campaign_perf['roas']
+            mean_roas_display = mean_roas
+            
         # 요약 통계 표시
         st.subheader("예산 조정 분석 요약")
         
