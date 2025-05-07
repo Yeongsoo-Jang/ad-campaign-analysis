@@ -21,7 +21,6 @@ from src.preprocessing import DataPreprocessor  # 데이터 전처리 모듈
 from src.ab_test import ABTestAnalyzer  # A/B 테스트 분석 모듈
 from src.insight_generator import InsightGenerator
 
-
 # 로그 디렉토리 확인 및 생성
 if not os.path.exists("logs"):
     os.makedirs("logs")
@@ -65,65 +64,89 @@ CONFIG_FILE_PATH = os.path.join(SCRIPT_DIR, 'config/config.yaml')
 # 설정 파일 로드
 @st.cache_data
 def load_config():
-    with open(CONFIG_FILE_PATH, 'r', encoding='utf-8') as file:
-        return yaml.safe_load(file)
+    try:
+        with open(CONFIG_FILE_PATH, 'r', encoding='utf-8') as file:
+            return yaml.safe_load(file)
+    except FileNotFoundError:
+        st.warning("설정 파일을 찾을 수 없습니다. 기본 설정을 사용합니다.")
+        return {"data_path": "data/campaign_data.csv"}
 
-# 데이터 전처리 설정
-st.sidebar.subheader("데이터 전처리")
-preprocess_data = st.sidebar.checkbox("데이터 전처리 적용", value=False)
+# 사이드바에 파일 업로드 기능 추가
+st.sidebar.header("데이터 소스")
+data_source = st.sidebar.radio(
+    "데이터 소스 선택",
+    options=["기본 데이터", "CSV 업로드"]
+)
 
-if preprocess_data:
-    preprocessing_options = {}
-    preprocessing_options['remove_outliers'] = st.sidebar.checkbox("이상치 제거", value=True)
-    
-    if preprocessing_options['remove_outliers']:
-        preprocessing_options['outlier_method'] = st.sidebar.selectbox(
-            "이상치 탐지 방법",
-            options=['iqr', 'zscore'],
-            format_func=lambda x: {'iqr': 'IQR (사분위 범위)', 'zscore': 'Z-score (표준점수)'}.get(x, x)
-        )
-    
-    preprocessing_options['normalize'] = st.sidebar.checkbox("정규화", value=True)
-    
-    if preprocessing_options['normalize']:
-        preprocessing_options['normalization_method'] = st.sidebar.selectbox(
-            "정규화 방법",
-            options=['standard', 'robust', 'minmax'],
-            format_func=lambda x: {
-                'standard': '표준화 (StandardScaler)',
-                'robust': '로버스트 스케일링 (RobustScaler)',
-                'minmax': '최소-최대 스케일링 (MinMaxScaler)'
-            }.get(x, x)
-        )
-    
-    preprocessing_options['create_features'] = st.sidebar.checkbox("파생변수 생성", value=True)
-
-
-# 데이터 로드
+# 데이터 로드 함수 수정
 @st.cache_data
-def load_data(file_path):
-    df = pd.read_csv(file_path)
+def load_data(file_path=None, uploaded_file=None):
+    # 업로드된 파일이 있는 경우
+    if uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+    # 파일 경로가 제공된 경우
+    elif file_path is not None:
+        df = pd.read_csv(file_path)
+    else:
+        st.error("데이터를 찾을 수 없습니다.")
+        return pd.DataFrame()
     
     # 날짜 형식 변환
     if 'date' in df.columns:
         df['date'] = pd.to_datetime(df['date'])
     
     # 데이터 전처리 적용
-    if preprocess_data:
-        preprocessor = DataPreprocessor()
-        df, preprocessing_info = preprocessor.preprocess_data(
-            df,
-            remove_outliers=preprocessing_options.get('remove_outliers', True),
-            outlier_method=preprocessing_options.get('outlier_method', 'iqr'),
-            normalize=preprocessing_options.get('normalize', True),
-            normalization_method=preprocessing_options.get('normalization_method', 'robust'),
-            create_features=preprocessing_options.get('create_features', True)
-        )
-        
-        # 전처리 정보 저장 (나중에 표시할 수 있음)
-        st.session_state.preprocessing_info = preprocessing_info
+    preprocessor = DataPreprocessor()
+    df, preprocessing_info = preprocessor.preprocess_data(
+        df,
+        remove_outliers=True,
+        outlier_method='iqr',
+        normalize=True,
+        normalization_method='robust',
+        create_features=True
+    )
+    
+    # 전처리 정보 저장
+    st.session_state.preprocessing_info = preprocessing_info
     
     return df
+
+# 데이터 로드
+try:
+    # 설정 파일 로드
+    config = load_config()
+    
+    if data_source == "기본 데이터":
+        # 기존 방식으로 데이터 로드
+        try:
+            df = load_data(config['data_path'])
+            st.sidebar.success(f"기본 데이터 로드 성공: {config['data_path']}")
+        except FileNotFoundError:
+            st.error("데이터 파일을 찾을 수 없습니다. config.yaml 파일에 지정된 경로를 확인해주세요.")
+            st.stop()
+    else:
+        # 파일 업로드 기능
+        uploaded_file = st.sidebar.file_uploader("CSV 파일을 업로드하세요", type=["csv"])
+        
+        if uploaded_file is not None:
+            # 업로드된 파일로 데이터 로드
+            df = load_data(uploaded_file=uploaded_file)
+            st.sidebar.success("파일 업로드 성공!")
+            
+            # 업로드된 데이터 정보 표시
+            with st.sidebar.expander("업로드된 데이터 정보"):
+                st.write(f"**행**: {df.shape[0]}, **열**: {df.shape[1]}")
+                
+                # 열 데이터 타입 요약
+                dtype_counts = df.dtypes.value_counts().to_dict()
+                dtype_summary = ", ".join([f"{count}개의 {dtype}" for dtype, count in dtype_counts.items()])
+                st.write(f"**데이터 타입**: {dtype_summary}")
+        else:
+            st.error("CSV 파일을 업로드하세요.")
+            st.stop()
+except Exception as e:
+    st.error(f"데이터 로드 중 오류가 발생했습니다: {e}")
+    st.stop()
 
 try:
     # 설정 파일 로드
@@ -255,8 +278,8 @@ try:
     else:
         st.warning("데이터가 없습니다. 필터 조건을 변경해보세요.")
     
-    # 전처리 정보 표시 섹션 (전처리를 적용한 경우에만)
-    if preprocess_data and hasattr(st.session_state, 'preprocessing_info'):
+    # 전처리 정보 표시 섹션
+    if hasattr(st.session_state, 'preprocessing_info'):
         st.header("데이터 전처리 정보")
         
         preprocessing_info = st.session_state.preprocessing_info
