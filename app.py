@@ -80,7 +80,7 @@ data_source = st.sidebar.radio(
 
 # 데이터 로드 함수 수정
 @st.cache_data
-def load_data(file_path=None, uploaded_file=None):
+def load_data(file_path=None, uploaded_file=None, apply_preprocessing=True):
     # 업로드된 파일이 있는 경우
     if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
@@ -95,19 +95,26 @@ def load_data(file_path=None, uploaded_file=None):
     if 'date' in df.columns:
         df['date'] = pd.to_datetime(df['date'])
     
-    # 데이터 전처리 적용
-    preprocessor = DataPreprocessor()
-    df, preprocessing_info = preprocessor.preprocess_data(
-        df,
-        remove_outliers=True,
-        outlier_method='iqr',
-        normalize=True,
-        normalization_method='robust',
-        create_features=True
-    )
+    # 원본 데이터 보존
+    original_df = df.copy()
     
-    # 전처리 정보 저장
-    st.session_state.preprocessing_info = preprocessing_info
+    # 데이터 전처리 적용 (옵션)
+    if apply_preprocessing:
+        preprocessor = DataPreprocessor()
+        df, preprocessing_info = preprocessor.preprocess_data(
+            df,
+            remove_outliers=True,
+            outlier_method='iqr',
+            normalize=True,
+            normalization_method='robust',
+            create_features=True
+        )
+        
+        # 전처리 정보 저장
+        st.session_state.preprocessing_info = preprocessing_info
+    
+    # 원본 데이터 저장
+    st.session_state.original_df = original_df
     
     return df
 
@@ -217,38 +224,71 @@ try:
     # 주요 지표 표시
     st.header("주요 지표")
     
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric(
-            label="총 지출",
-            value=f"₩{filtered_df['spend'].sum():,.0f}",
-            delta=f"{filtered_df['spend'].sum() / filtered_df['daily_budget'].sum():.1%} (예산 대비)"
-        )
-    
-    with col2:
-        st.metric(
-            label="총 수익",
-            value=f"₩{filtered_df['revenue'].sum():,.0f}",
-            delta=None
-        )
-    
-    with col3:
-        avg_roas = filtered_df['revenue'].sum() / filtered_df['spend'].sum() if filtered_df['spend'].sum() > 0 else 0
-        st.metric(
-            label="평균 ROAS",
-            value=f"{avg_roas:.2f}",
-            delta=None
-        )
-    
-    with col4:
-        total_conversions = filtered_df['conversions'].sum()
-        cost_per_conversion = filtered_df['spend'].sum() / total_conversions if total_conversions > 0 else 0
-        st.metric(
-            label="전환당 비용 (CPA)",
-            value=f"₩{cost_per_conversion:,.0f}",
-            delta=None
-        )
+    if hasattr(st.session_state, 'original_df'):
+        # 원본 데이터에서 필터링된 부분을 가져와 집계
+        original_filtered = st.session_state.original_df.copy()
+        
+        # 동일한 필터 적용
+        if len(date_range) == 2:
+            start_date, end_date = date_range
+            original_filtered = original_filtered[(original_filtered['date'].dt.date >= start_date) & 
+                                              (original_filtered['date'].dt.date <= end_date)]
+        
+        if selected_platform != '전체':
+            original_filtered = original_filtered[original_filtered['platform'] == selected_platform]
+        
+        if selected_campaign != '전체':
+            original_filtered = original_filtered[original_filtered['campaign_name'] == selected_campaign]
+        
+        if selected_age != '전체':
+            original_filtered = original_filtered[original_filtered['target_age'] == selected_age]
+        
+        if selected_gender != '전체':
+            original_filtered = original_filtered[original_filtered['target_gender'] == selected_gender]
+            
+        if selected_creative != '전체':
+            original_filtered = original_filtered[original_filtered['creative_type'] == selected_creative]
+        
+        # 원본 데이터로 지표 계산
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            spend_sum_orig = original_filtered['spend'].sum()
+            daily_budget_sum_orig = original_filtered['daily_budget'].sum()
+            delta_orig = f"{spend_sum_orig / daily_budget_sum_orig:.1%} (예산 대비)" if daily_budget_sum_orig > 0 else "N/A"
+            st.metric(label="총 지출 (원본)", value=f"₩{spend_sum_orig:,.0f}", delta=delta_orig)
+        with col2:
+            st.metric(label="총 수익 (원본)", value=f"₩{original_filtered['revenue'].sum():,.0f}", delta=None)
+        with col3:
+            revenue_sum_orig = original_filtered['revenue'].sum()
+            spend_sum_orig_for_roas = original_filtered['spend'].sum()
+            avg_roas_orig = revenue_sum_orig / spend_sum_orig_for_roas if spend_sum_orig_for_roas > 0 else 0
+            st.metric(label="평균 ROAS (원본)", value=f"{avg_roas_orig:.2f}", delta=None)
+        with col4:
+            total_conversions_orig = original_filtered['conversions'].sum()
+            spend_sum_orig_for_cpa = original_filtered['spend'].sum()
+            cost_per_conversion_orig = spend_sum_orig_for_cpa / total_conversions_orig if total_conversions_orig > 0 else 0
+            st.metric(label="전환당 비용 (CPA) (원본)", value=f"₩{cost_per_conversion_orig:,.0f}", delta=None)
+    else:
+        # 기존 코드 사용 (세션 저장소에 원본 데이터가 없는 경우, filtered_df 사용)
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            spend_sum_filt = filtered_df['spend'].sum()
+            daily_budget_sum_filt = filtered_df['daily_budget'].sum()
+            delta_filt = f"{spend_sum_filt / daily_budget_sum_filt:.1%} (예산 대비)" if daily_budget_sum_filt > 0 else "N/A"
+            st.metric(label="총 지출", value=f"₩{spend_sum_filt:,.0f}", delta=delta_filt)
+        with col2:
+            st.metric(label="총 수익", value=f"₩{filtered_df['revenue'].sum():,.0f}", delta=None)
+        with col3:
+            revenue_sum_filt = filtered_df['revenue'].sum()
+            spend_sum_filt_for_roas = filtered_df['spend'].sum()
+            avg_roas_filt = revenue_sum_filt / spend_sum_filt_for_roas if spend_sum_filt_for_roas > 0 else 0
+            st.metric(label="평균 ROAS", value=f"{avg_roas_filt:.2f}", delta=None)
+        with col4:
+            total_conversions_filt = filtered_df['conversions'].sum()
+            spend_sum_filt_for_cpa = filtered_df['spend'].sum()
+            cost_per_conversion_filt = spend_sum_filt_for_cpa / total_conversions_filt if total_conversions_filt > 0 else 0
+            st.metric(label="전환당 비용 (CPA)", value=f"₩{cost_per_conversion_filt:,.0f}", delta=None)
     
     # 인사이트 섹션 추가
     st.header("AI 인사이트")
